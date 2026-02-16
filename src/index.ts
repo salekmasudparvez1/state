@@ -1,11 +1,10 @@
-import express, { type Request, type Response } from "express";
-import axios from "axios";
+import { VercelRequest, VercelResponse } from '@vercel/node';
+import express from 'express';
+import axios from 'axios';
 
 const app = express();
 
 // --- Configuration ---
-// Note: In serverless, we don't define a PORT. The cloud provider handles it.
-
 interface GitHubStats {
   username: string;
   totalRepos: number;
@@ -21,6 +20,14 @@ const themes = {
   midnight: { bg: ["#000000", "#1a1a1a"], border: "#333333", text: "#eeeeee", title: "#ff006e", icon: "#888888", ring: "#ffbe0b" },
 };
 
+// GitHub language colors
+const langColors: Record<string, string> = {
+  JavaScript: "#f1e05a", TypeScript: "#3178c6", Python: "#3572A5",
+  Java: "#b07219", Go: "#00ADD8", Rust: "#dea584",
+  HTML: "#e34c26", CSS: "#563d7c", Vue: "#41b883", React: "#61dafb"
+};
+
+// Icons for stats
 const icons = {
   repo: "M3 2.5c0-.27.22-.5.5-.5h14c.27 0 .5.22.5.5v15c0 .27-.22.5-.5.5h-1.5a.75.75 0 0 1 0-1.5h1V3.5H3.5V14h1a.75.75 0 0 1 0 1.5h-1c-.27 0-.5-.22-.5-.5v-12.5Z M9.75 7.75a.75.75 0 0 0 0 1.5h4.5a.75.75 0 0 0 0-1.5h-4.5Z M9.75 11.25a.75.75 0 0 0 0 1.5h2.5a.75.75 0 0 0 0-1.5h-2.5Z",
   star: "M8 .25a.75.75 0 0 1 .673.418l1.882 3.815 4.21.612a.75.75 0 0 1 .416 1.279l-3.046 2.97.719 4.192a.75.75 0 0 1-1.088.791L8 12.347l-3.766 1.98a.75.75 0 0 1-1.088-.79l.72-4.194L.818 6.374a.75.75 0 0 1 .416-1.28l4.21-.611L7.327.668A.75.75 0 0 1 8 .25Z",
@@ -28,17 +35,11 @@ const icons = {
   commit: "M10.5 7.75a2.5 2.5 0 1 1-5 0 2.5 2.5 0 0 1 5 0Zm1.43.75a4.002 4.002 0 0 1-7.86 0H.75a.75.75 0 1 1 0-1.5h3.32a4.001 4.001 0 0 1 7.86 0h3.32a.75.75 0 1 1 0 1.5h-3.32Z"
 };
 
-const langColors: Record<string, string> = {
-  JavaScript: "#f1e05a", TypeScript: "#3178c6", Python: "#3572A5",
-  Java: "#b07219", Go: "#00ADD8", Rust: "#dea584",
-  HTML: "#e34c26", CSS: "#563d7c", Vue: "#41b883", React: "#61dafb"
-};
-
-// --- Generator ---
+// --- SVG generator with animation ---
 function generateSVG(stats: GitHubStats, themeKey: keyof typeof themes, animate: boolean) {
   const t = themes[themeKey] || themes.default;
-  const width = 450;
-  const height = 195; 
+  const width = 460;
+  const height = 200;
 
   const css = `
     .root { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif; }
@@ -47,63 +48,61 @@ function generateSVG(stats: GitHubStats, themeKey: keyof typeof themes, animate:
     .stat-value { font-size: 16px; fill: ${t.text}; font-weight: 700; }
     .icon { fill: ${t.icon}; }
     .lang-name { font-size: 11px; fill: ${t.text}; }
-    .animate-fade { opacity: 0; animation: fadeIn 0.8s ease-out forwards; }
-    .animate-grow { transform: scaleX(0); transform-origin: left; animation: growIn 1s cubic-bezier(0.4, 0, 0.2, 1) forwards; }
+    .fade { opacity: 0; animation: fadeIn 0.8s ease-out forwards; }
+    .grow { transform: scaleX(0); transform-origin: left; animation: growIn 1s cubic-bezier(0.4,0,0.2,1) forwards; }
     @keyframes fadeIn { to { opacity: 1; } }
     @keyframes growIn { to { transform: scaleX(1); } }
   `;
 
-  const renderStat = (x: number, y: number, iconPath: string, label: string, value: number, delay: number) => `
-    <g transform="translate(${x}, ${y})" class="${animate ? 'animate-fade' : ''}" style="animation-delay: ${delay}ms">
-      <path d="${iconPath}" class="icon" transform="scale(1.2)"/>
+  const renderStat = (x: number, y: number, icon: string, label: string, value: number, delay: number) => `
+    <g transform="translate(${x}, ${y})" class="${animate ? 'fade' : ''}" style="animation-delay:${delay}ms">
+      <path d="${icon}" class="icon" transform="scale(1.2)"/>
       <text x="28" y="12" class="stat-value">${value.toLocaleString()}</text>
       <text x="0" y="32" class="stat-label">${label}</text>
     </g>
   `;
 
-  const renderLangs = () => stats.topLanguages.slice(0, 4).map((l, i) => {
-    const y = i * 28;
-    const barWidth = Math.max(10, (l.percentage / 100) * 120);
+  const renderLangs = () => stats.topLanguages.slice(0,4).map((l,i) => {
+    const y = i*28;
+    const barWidth = Math.max(10,(l.percentage/100)*120);
     const color = langColors[l.name] || t.ring;
     return `
-      <g transform="translate(0, ${y})">
+      <g transform="translate(0,${y})">
         <text y="10" class="lang-name">${l.name}</text>
         <rect x="70" y="2" width="120" height="8" rx="4" fill="${t.border}" fill-opacity="0.4"/>
-        <rect x="70" y="2" width="${barWidth}" height="8" rx="4" fill="${color}" class="${animate ? 'animate-grow' : ''}" style="animation-delay: ${(i+2)*150}ms"/>
+        <rect x="70" y="2" width="${barWidth}" height="8" rx="4" fill="${color}" class="${animate ? 'grow' : ''}" style="animation-delay:${(i+2)*150}ms"/>
       </g>
     `;
   }).join('');
 
   return `
-    <svg width="${width}" height="${height}" viewBox="0 0 ${width} ${height}" fill="none" xmlns="http://www.w3.org/2000/svg">
-      <style>${css}</style>
-      <defs>
-        <linearGradient id="grad" x1="0" y1="0" x2="1" y2="1">
-          <stop offset="0%" stop-color="${t.bg[0]}"/>
-          <stop offset="100%" stop-color="${t.bg[1]}"/>
-        </linearGradient>
-      </defs>
-      <rect width="${width}" height="${height}" rx="10" fill="url(#grad)" stroke="${t.border}" stroke-width="1"/>
-      <g class="root" transform="translate(25, 25)">
-        <text x="0" y="15" class="title">@${stats.username}</text>
-        <line x1="0" y1="35" x2="${width-50}" y2="35" stroke="${t.border}" />
-        <g transform="translate(0, 60)">
-           ${renderStat(0, 0, icons.star, "Total Stars", stats.totalStars, 100)}
-           ${renderStat(110, 0, icons.commit, "Commits", stats.totalCommits, 200)}
-           ${renderStat(0, 55, icons.repo, "Repos", stats.totalRepos, 300)}
-           ${renderStat(110, 55, icons.fork, "Forks", stats.totalForks, 400)}
-        </g>
-        <g transform="translate(220, 55)">
-          ${renderLangs()}
-        </g>
-      </g>
-    </svg>
-  `;
+<svg width="${width}" height="${height}" viewBox="0 0 ${width} ${height}" xmlns="http://www.w3.org/2000/svg">
+  <style>${css}</style>
+  <defs>
+    <linearGradient id="grad" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0%" stop-color="${t.bg[0]}"/>
+      <stop offset="100%" stop-color="${t.bg[1]}"/>
+    </linearGradient>
+  </defs>
+  <rect width="${width}" height="${height}" rx="10" fill="url(#grad)" stroke="${t.border}" stroke-width="1"/>
+  <g class="root" transform="translate(25,25)">
+    <text x="0" y="15" class="title">@${stats.username}</text>
+    <line x1="0" y1="35" x2="${width-50}" y2="35" stroke="${t.border}" />
+    <g transform="translate(0,60)">
+      ${renderStat(0,0,icons.star,"Total Stars",stats.totalStars,100)}
+      ${renderStat(110,0,icons.commit,"Commits",stats.totalCommits,200)}
+      ${renderStat(0,55,icons.repo,"Repos",stats.totalRepos,300)}
+      ${renderStat(110,55,icons.fork,"Forks",stats.totalForks,400)}
+    </g>
+    <g transform="translate(220,55)">
+      ${renderLangs()}
+    </g>
+  </g>
+</svg>`;
 }
 
-// --- Routes ---
-
-app.get("/api/stats", async (req: Request, res: Response) => {
+// --- API Route for Vercel ---
+app.get('/api/stats', async (req,res) => {
   const username = req.query.username as string;
   const theme = (req.query.theme as keyof typeof themes) || "default";
   const animate = req.query.animate !== "false";
@@ -117,58 +116,33 @@ app.get("/api/stats", async (req: Request, res: Response) => {
     ]);
 
     const repos = reposRes.data;
-    const languages: Record<string, number> = {};
-    let totalStars = 0;
-    let totalForks = 0;
-
-    repos.forEach((repo: any) => {
-      totalStars += repo.stargazers_count;
-      totalForks += repo.forks_count;
-      if (repo.language) languages[repo.language] = (languages[repo.language] || 0) + 1;
-    });
-
-    const totalCount = Object.values(languages).reduce((a, b) => a + b, 0);
+    let totalStars=0,totalForks=0;
+    const languages: Record<string,number> = {};
+    repos.forEach((r:any)=>{totalStars+=r.stargazers_count;totalForks+=r.forks_count;if(r.language)languages[r.language]=(languages[r.language]||0)+1});
+    const totalCount = Object.values(languages).reduce((a,b)=>a+b,0);
     const topLanguages = Object.entries(languages)
-      .sort(([, a], [, b]) => b - a)
-      .map(([name, count]) => ({
-        name,
-        count,
-        percentage: (count / totalCount) * 100
-      }));
+      .sort(([,a],[,b])=>b-a)
+      .map(([name,count])=>({name,count,percentage:(count/totalCount)*100}));
 
     const stats: GitHubStats = {
       username: userRes.data.login,
       totalRepos: userRes.data.public_repos,
       totalStars,
       totalForks,
-      totalCommits: 0,
+      totalCommits:0,
       topLanguages
     };
 
-    res.setHeader("Content-Type", "image/svg+xml");
-    res.setHeader("Cache-Control", "public, max-age=1800");
-    res.send(generateSVG(stats, theme, animate));
-
-  } catch (error) {
-    console.error(error);
+    res.setHeader("Content-Type","image/svg+xml");
+    res.setHeader("Cache-Control","public, max-age=1800");
+    res.send(generateSVG(stats,theme,animate));
+  } catch(err){
+    console.error(err);
     res.status(500).send("Error fetching data");
   }
 });
 
 // Default route
-app.get("/", (_req, res) => {
-  res.send("GitHub Stats API is running 🚀");
-});
+app.get('/',(_req,res)=>res.send('GitHub Stats API running 🚀'));
 
-// --- Serverless Entry Point Logic ---
 
-// 1. Export the app for Vercel/Serverless
-export default app;
-
-// 2. Only listen if running locally (Development)
-if (process.env.NODE_ENV !== "production") {
-  const PORT = process.env.PORT || 3000;
-  app.listen(PORT, () => {
-    console.log(`⚡️ Dev Server running on http://localhost:${PORT}`);
-  });
-}
