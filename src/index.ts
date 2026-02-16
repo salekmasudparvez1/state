@@ -1,8 +1,6 @@
 
-import express from 'express';
-import axios from 'axios';
-
-const app = express();
+type NodeLikeRequest = { url?: string; headers?: Record<string, string | string[] | undefined> };
+type NodeLikeResponse = { setHeader: (name: string, value: string) => void; end: (body?: string) => void; statusCode: number };
 
 // --- Configuration ---
 interface GitHubStats {
@@ -101,48 +99,131 @@ function generateSVG(stats: GitHubStats, themeKey: keyof typeof themes, animate:
 </svg>`;
 }
 
-// --- API Route for Vercel ---
-app.get('/api/stats', async (req,res) => {
-  const username = req.query.username as string;
-  const theme = (req.query.theme as keyof typeof themes) || "default";
-  const animate = req.query.animate !== "false";
+function parseBoolean(value: string | null, defaultValue: boolean) {
+  if (value === null) return defaultValue;
+  return value !== "false";
+}
 
-  if (!username) return res.status(400).send("Missing username");
+function toRequest(nodeReq: NodeLikeRequest) {
+  const headers = new Headers();
+  if (nodeReq.headers) {
+    Object.entries(nodeReq.headers).forEach(([key, value]) => {
+      if (Array.isArray(value)) {
+        value.forEach((item) => headers.append(key, item));
+      } else if (typeof value === "string") {
+        headers.set(key, value);
+      }
+    });
+  }
+
+  const host = headers.get("host") || "localhost";
+  const url = nodeReq.url ? `https://${host}${nodeReq.url}` : `https://${host}/`;
+  return new Request(url, { method: "GET", headers });
+}
+
+async function handleRequest(request: Request) {
+  const url = new URL(request.url);
+  const pathname = url.pathname;
+
+  if (pathname === "/") {
+    return new Response("GitHub Stats API running", {
+      status: 200,
+      headers: { "Content-Type": "text/plain; charset=utf-8" },
+    });
+  }
+
+  if (pathname !== "/api/stats") {
+    return new Response("Not Found", { status: 404 });
+  }
+
+  const username = url.searchParams.get("username");
+  const themeParam = url.searchParams.get("theme") as keyof typeof themes | null;
+  const theme = (themeParam && themes[themeParam]) ? themeParam : "default";
+  const animate = parseBoolean(url.searchParams.get("animate"), true);
+
+  if (!username) {
+    return new Response("Missing username", { status: 400 });
+  }
 
   try {
+    const userUrl = `https://api.github.com/users/${username}`;
+    const reposUrl = `https://api.github.com/users/${username}/repos?per_page=100`;
+    const headers = { "User-Agent": "git-state", Accept: "application/vnd.github+json" };
+
     const [userRes, reposRes] = await Promise.all([
-      axios.get(`https://api.github.com/users/${username}`),
-      axios.get(`https://api.github.com/users/${username}/repos?per_page=100`)
+      fetch(userUrl, { headers }),
+      fetch(reposUrl, { headers }),
     ]);
 
-    const repos = reposRes.data;
-    let totalStars=0,totalForks=0;
-    const languages: Record<string,number> = {};
-    repos.forEach((r:any)=>{totalStars+=r.stargazers_count;totalForks+=r.forks_count;if(r.language)languages[r.language]=(languages[r.language]||0)+1});
-    const totalCount = Object.values(languages).reduce((a,b)=>a+b,0);
+    if (!userRes.ok || !reposRes.ok) {
+      return new Response("Error fetching data", { status: 502 });
+    }
+
+    const userData = await userRes.json();
+    const repos = await reposRes.json();
+
+    let totalStars = 0;
+    let totalForks = 0;
+    const languages: Record<string, number> = {};
+
+    repos.forEach((repo: any) => {
+      totalStars += repo.stargazers_count || 0;
+      totalForks += repo.forks_count || 0;
+      if (repo.language) {
+        languages[repo.language] = (languages[repo.language] || 0) + 1;
+      }
+    });
+
+    const totalCount = Object.values(languages).reduce((sum, count) => sum + count, 0);
     const topLanguages = Object.entries(languages)
-      .sort(([,a],[,b])=>b-a)
-      .map(([name,count])=>({name,count,percentage:(count/totalCount)*100}));
+      .sort(([, a], [, b]) => b - a)
+      .map(([name, count]) => ({
+        name,
+        count,
+        percentage: totalCount ? (count / totalCount) * 100 : 0,
+      }));
 
     const stats: GitHubStats = {
-      username: userRes.data.login,
-      totalRepos: userRes.data.public_repos,
+      username: userData.login,
+      totalRepos: userData.public_repos,
       totalStars,
       totalForks,
-      totalCommits:0,
-      topLanguages
+      totalCommits: 0,
+      topLanguages,
     };
 
-    res.setHeader("Content-Type","image/svg+xml");
-    res.setHeader("Cache-Control","public, max-age=1800");
-    res.send(generateSVG(stats,theme,animate));
-  } catch(err){
-    console.error(err);
-    res.status(500).send("Error fetching data");
+    const svg = generateSVG(stats, theme, animate);
+    return new Response(svg, {
+      status: 200,
+      headers: {
+        "Content-Type": "image/svg+xml",
+        "Cache-Control": "public, max-age=1800",
+      },
+    });
+  } catch (error) {
+    console.error(error);
+    return new Response("Error fetching data", { status: 500 });
   }
-});
+}
 
-// Default route
-app.get('/',(_req,res)=>res.send('GitHub Stats API running 🚀'));
+export default async function handler(req: Request | NodeLikeRequest, res?: NodeLikeResponse) {
+  if (res) {
+    const response = await handleRequest(toRequest(req as NodeLikeRequest));
+    res.statusCode = response.status;
+    response.headers.forEach((value, key) => res.setHeader(key, value));
+    res.end(await response.text());
+    return;
+  }
+
+  return handleRequest(req as Request);
+}
+
+if (typeof Bun !== "undefined" && import.meta.main) {
+  Bun.serve({
+    fetch: handleRequest,
+    port: Number(process.env.PORT || 3000),
+  });
+  console.log("GitHub Stats API running on http://localhost:3000");
+}
 
 
