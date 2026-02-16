@@ -4,7 +4,7 @@
   "type": "commonjs",
   "private": true,
   "engines": {
-    "node": "18.x"
+    "node": "24.x"
   },
   "scripts": {
     "dev": "ts-node-dev --respawn --transpile-only src/index.ts"
