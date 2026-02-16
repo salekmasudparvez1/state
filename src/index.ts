@@ -220,7 +220,7 @@ async function buildResponse(url: URL): Promise<ResponsePayload> {
   }
 }
 
-export default async function handler(req: NodeLikeRequest, res: NodeLikeResponse) {
+async function handler(req: NodeLikeRequest, res: NodeLikeResponse) {
   const headers = normalizeHeaders(req.headers);
   const host = headers.host || "localhost";
   const url = new URL(req.url || "/", `https://${host}`);
@@ -230,6 +230,8 @@ export default async function handler(req: NodeLikeRequest, res: NodeLikeRespons
   Object.entries(response.headers).forEach(([key, value]) => res.setHeader(key, value));
   res.end(response.body);
 }
+
+module.exports = handler;
 
 async function handleFetch(request: Request) {
   const response = await buildResponse(new URL(request.url));
