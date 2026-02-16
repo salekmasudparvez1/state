@@ -3,6 +3,9 @@
   "module": "index.ts",
   "type": "commonjs",
   "private": true,
+  "engines": {
+    "node": "18.x"
+  },
   "scripts": {
     "dev": "ts-node-dev --respawn --transpile-only src/index.ts"
   },

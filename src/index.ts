@@ -1,6 +1,7 @@
 
 type NodeLikeRequest = { url?: string; headers?: Record<string, string | string[] | undefined> };
 type NodeLikeResponse = { setHeader: (name: string, value: string) => void; end: (body?: string) => void; statusCode: number };
+type ResponsePayload = { status: number; headers: Record<string, string>; body: string };
 
 // --- Configuration ---
 interface GitHubStats {
@@ -104,36 +105,36 @@ function parseBoolean(value: string | null, defaultValue: boolean) {
   return value !== "false";
 }
 
-function toRequest(nodeReq: NodeLikeRequest) {
-  const headers = new Headers();
-  if (nodeReq.headers) {
-    Object.entries(nodeReq.headers).forEach(([key, value]) => {
-      if (Array.isArray(value)) {
-        value.forEach((item) => headers.append(key, item));
-      } else if (typeof value === "string") {
-        headers.set(key, value);
-      }
-    });
-  }
-
-  const host = headers.get("host") || "localhost";
-  const url = nodeReq.url ? `https://${host}${nodeReq.url}` : `https://${host}/`;
-  return new Request(url, { method: "GET", headers });
+function normalizeHeaders(headers?: Record<string, string | string[] | undefined>) {
+  const normalized: Record<string, string> = {};
+  if (!headers) return normalized;
+  Object.entries(headers).forEach(([key, value]) => {
+    if (Array.isArray(value)) {
+      normalized[key.toLowerCase()] = value.join(", ");
+    } else if (typeof value === "string") {
+      normalized[key.toLowerCase()] = value;
+    }
+  });
+  return normalized;
 }
 
-async function handleRequest(request: Request) {
-  const url = new URL(request.url);
+async function buildResponse(url: URL): Promise<ResponsePayload> {
   const pathname = url.pathname;
 
   if (pathname === "/") {
-    return new Response("GitHub Stats API running", {
+    return {
       status: 200,
       headers: { "Content-Type": "text/plain; charset=utf-8" },
-    });
+      body: "GitHub Stats API running",
+    };
   }
 
   if (pathname !== "/api/stats") {
-    return new Response("Not Found", { status: 404 });
+    return {
+      status: 404,
+      headers: { "Content-Type": "text/plain; charset=utf-8" },
+      body: "Not Found",
+    };
   }
 
   const username = url.searchParams.get("username");
@@ -142,7 +143,11 @@ async function handleRequest(request: Request) {
   const animate = parseBoolean(url.searchParams.get("animate"), true);
 
   if (!username) {
-    return new Response("Missing username", { status: 400 });
+    return {
+      status: 400,
+      headers: { "Content-Type": "text/plain; charset=utf-8" },
+      body: "Missing username",
+    };
   }
 
   try {
@@ -156,7 +161,11 @@ async function handleRequest(request: Request) {
     ]);
 
     if (!userRes.ok || !reposRes.ok) {
-      return new Response("Error fetching data", { status: 502 });
+      return {
+        status: 502,
+        headers: { "Content-Type": "text/plain; charset=utf-8" },
+        body: "Error fetching data",
+      };
     }
 
     const userData = await userRes.json();
@@ -193,34 +202,43 @@ async function handleRequest(request: Request) {
     };
 
     const svg = generateSVG(stats, theme, animate);
-    return new Response(svg, {
+    return {
       status: 200,
       headers: {
         "Content-Type": "image/svg+xml",
         "Cache-Control": "public, max-age=1800",
       },
-    });
+      body: svg,
+    };
   } catch (error) {
     console.error(error);
-    return new Response("Error fetching data", { status: 500 });
+    return {
+      status: 500,
+      headers: { "Content-Type": "text/plain; charset=utf-8" },
+      body: "Error fetching data",
+    };
   }
 }
 
-export default async function handler(req: Request | NodeLikeRequest, res?: NodeLikeResponse) {
-  if (res) {
-    const response = await handleRequest(toRequest(req as NodeLikeRequest));
-    res.statusCode = response.status;
-    response.headers.forEach((value, key) => res.setHeader(key, value));
-    res.end(await response.text());
-    return;
-  }
+export default async function handler(req: NodeLikeRequest, res: NodeLikeResponse) {
+  const headers = normalizeHeaders(req.headers);
+  const host = headers.host || "localhost";
+  const url = new URL(req.url || "/", `https://${host}`);
+  const response = await buildResponse(url);
 
-  return handleRequest(req as Request);
+  res.statusCode = response.status;
+  Object.entries(response.headers).forEach(([key, value]) => res.setHeader(key, value));
+  res.end(response.body);
+}
+
+async function handleFetch(request: Request) {
+  const response = await buildResponse(new URL(request.url));
+  return new Response(response.body, { status: response.status, headers: response.headers });
 }
 
 if (typeof Bun !== "undefined" && import.meta.main) {
   Bun.serve({
-    fetch: handleRequest,
+    fetch: handleFetch,
     port: Number(process.env.PORT || 3000),
   });
   console.log("GitHub Stats API running on http://localhost:3000");
