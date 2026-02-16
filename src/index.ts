@@ -236,12 +236,4 @@ async function handleFetch(request: Request) {
   return new Response(response.body, { status: response.status, headers: response.headers });
 }
 
-if (typeof Bun !== "undefined" && import.meta.main) {
-  Bun.serve({
-    fetch: handleFetch,
-    port: Number(process.env.PORT || 3000),
-  });
-  console.log("GitHub Stats API running on http://localhost:3000");
-}
-
 
