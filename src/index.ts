@@ -1,33 +1,30 @@
-import type { IncomingMessage, ServerResponse } from "http";
+import express, { Request, Response } from "express";
 import { buildResponse } from "./router";
 import { normalizeHeaders } from "./utils";
 import { NodeLikeRequest } from "./types";
 
-// Vercel serverless + local Node.js handler
-export default async function handler(req: IncomingMessage, res: ServerResponse) {
+const app = express();
+
+app.get("*", async (req: Request, res: Response) => {
   try {
     const headers = normalizeHeaders(req.headers as NodeLikeRequest["headers"]);
     const host = headers.host || "localhost";
     const protocol = headers["x-forwarded-proto"] === "https" ? "https" : "http";
-    const url = new URL(req.url || "/", `${protocol}://${host}`);
+    const url = new URL(req.url, `${protocol}://${host}`);
     const response = await buildResponse(url);
 
-    res.statusCode = response.status;
+    res.status(response.status);
     Object.entries(response.headers).forEach(([k, v]) => res.setHeader(k, v));
-    res.end(response.body);
+    res.send(response.body);
   } catch {
-    res.statusCode = 500;
-    res.setHeader("Content-Type", "text/plain");
-    res.end("Internal server error");
+    res.status(500).type("text").send("Internal server error");
   }
-}
+});
 
-// Local dev server — only runs when executed directly (not on Vercel)
-if (process.env.NODE_ENV !== "production" && require.main === module) {
-  const http = require("http");
+// Local dev
+if (require.main === module) {
   const PORT = process.env.PORT || 3000;
-
-  http.createServer(handler).listen(PORT, () => {
+  app.listen(PORT, () => {
     console.log(`\n╔════════════════════════════════════════╗`);
     console.log(`║     🚀 GitHub Stats API                ║`);
     console.log(`╚════════════════════════════════════════╝\n`);
@@ -36,3 +33,5 @@ if (process.env.NODE_ENV !== "production" && require.main === module) {
     console.log(`📊 Example: http://localhost:${PORT}/api/stats?username=octocat\n`);
   });
 }
+
+export default app;
