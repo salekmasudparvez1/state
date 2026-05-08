@@ -1,5 +1,6 @@
 {
   "name": "git-state",
+  "version": "1.0.1",
   "module": "index.ts",
   "type": "commonjs",
   "private": true,
