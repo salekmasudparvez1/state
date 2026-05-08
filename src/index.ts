@@ -1,10 +1,10 @@
-import http from "http";
 import type { IncomingMessage, ServerResponse } from "http";
 import { buildResponse } from "./router";
 import { normalizeHeaders } from "./utils";
-import { NodeLikeRequest, NodeLikeResponse } from "./types";
+import { NodeLikeRequest } from "./types";
 
-async function nodeHandler(req: IncomingMessage, res: ServerResponse) {
+// Vercel serverless + local Node.js handler
+export default async function handler(req: IncomingMessage, res: ServerResponse) {
   try {
     const headers = normalizeHeaders(req.headers as NodeLikeRequest["headers"]);
     const host = headers.host || "localhost";
@@ -22,34 +22,17 @@ async function nodeHandler(req: IncomingMessage, res: ServerResponse) {
   }
 }
 
-export async function handleFetch(request: Request): Promise<Response> {
-  try {
-    const response = await buildResponse(new URL(request.url));
-    return new Response(response.body, {
-      status: response.status,
-      headers: new Headers(response.headers),
-    });
-  } catch {
-    return new Response("Internal server error", { status: 500 });
-  }
+// Local dev server — only runs when executed directly (not on Vercel)
+if (process.env.NODE_ENV !== "production" && require.main === module) {
+  const http = require("http");
+  const PORT = process.env.PORT || 3000;
+
+  http.createServer(handler).listen(PORT, () => {
+    console.log(`\n╔════════════════════════════════════════╗`);
+    console.log(`║     🚀 GitHub Stats API                ║`);
+    console.log(`╚════════════════════════════════════════╝\n`);
+    console.log(`📡 Server : http://localhost:${PORT}`);
+    console.log(`📖 Docs   : http://localhost:${PORT}/`);
+    console.log(`📊 Example: http://localhost:${PORT}/api/stats?username=octocat\n`);
+  });
 }
-
-// Server bootstrap
-const PORT = process.env.PORT || 3000;
-const server = http.createServer(nodeHandler);
-
-server.listen(PORT, () => {
-  console.log(`\n╔════════════════════════════════════════╗`);
-  console.log(`║     🚀 GitHub Stats API                ║`);
-  console.log(`╚════════════════════════════════════════╝\n`);
-  console.log(`📡 Server : http://localhost:${PORT}`);
-  console.log(`📖 Docs   : http://localhost:${PORT}/`);
-  console.log(`📊 Example: http://localhost:${PORT}/api/stats?username=octocat\n`);
-});
-
-process.on("SIGTERM", () => {
-  console.log("\n🛑 Shutting down...");
-  server.close(() => process.exit(0));
-});
-
-export default handleFetch;
