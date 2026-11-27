@@ -26,8 +26,8 @@ export default async function handler(req: IncomingMessage, res: ServerResponse)
 // Local dev server — only runs when executed directly
 if (require.main === module) {
   const http = require("http");
-  const PORT = process.env.PORT || 3000;
-  http.createServer(handler).listen(PORT, () => {
+  const PORT = Number(process.env.PORT) || 3000;
+  http.createServer(handler).listen(PORT, "0.0.0.0", () => {
     console.log(`\n╔════════════════════════════════════════╗`);
     console.log(`║     🚀 GitHub Stats API                ║`);
     console.log(`╚════════════════════════════════════════╝\n`);

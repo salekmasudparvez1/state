@@ -16,6 +16,8 @@ export type ResponsePayload = {
   body: string;
 };
 
+export type CardVariant = "modern" | "glass" | "minimal";
+
 export interface GitHubStats {
   username: string;
   name: string;
@@ -31,4 +33,6 @@ export interface GitHubStats {
   totalFollowing: number;
   createdAt: string;
   topLanguages: Array<{ name: string; count: number; percentage: number }>;
+  aiStack: string[];
+  inferredRole: string;
 }

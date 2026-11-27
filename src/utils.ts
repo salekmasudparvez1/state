@@ -1,6 +1,9 @@
 export function parseBoolean(value: string | null, defaultValue: boolean): boolean {
   if (value === null) return defaultValue;
-  return value !== "false";
+  const normalized = value.trim().toLowerCase();
+  if (normalized === "false" || normalized === "0" || normalized === "no") return false;
+  if (normalized === "true" || normalized === "1" || normalized === "yes") return true;
+  return defaultValue;
 }
 
 export function normalizeHeaders(
@@ -19,12 +22,25 @@ export function normalizeHeaders(
 }
 
 export function formatNumber(num: number): string {
-  if (num >= 1_000_000) return (num / 1_000_000).toFixed(1) + "M";
-  if (num >= 1_000) return (num / 1_000).toFixed(1) + "K";
-  return num.toString();
+  if (!Number.isFinite(num) || num < 0) return "0";
+  if (num >= 1_000_000) return (num / 1_000_000).toFixed(1).replace(/\.0$/, "") + "M";
+  if (num >= 1_000) return (num / 1_000).toFixed(1).replace(/\.0$/, "") + "K";
+  return Math.round(num).toString();
 }
 
 export function truncate(str: string, maxLen: number): string {
   if (!str) return "";
-  return str.length > maxLen ? str.substring(0, maxLen - 2) + ".." : str;
+  const clean = str.replace(/\s+/g, " ").trim();
+  if (clean.length <= maxLen) return clean;
+  return clean.substring(0, Math.max(0, maxLen - 1)).trimEnd() + "…";
+}
+
+export function escapeXml(str: string): string {
+  if (!str) return "";
+  return str
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;")
+    .replace(/'/g, "&apos;");
 }
