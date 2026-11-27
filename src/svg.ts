@@ -3,11 +3,21 @@ import { themes, langColors } from "./config";
 import { escapeXml, formatNumber, truncate } from "./utils";
 
 function stripEmoji(text: string): string {
-  // Remove surrogate-pair emojis & variation selectors that render inconsistently in headless SVG
   return text
     .replace(/[\u{1F300}-\u{1FAFF}\u{2600}-\u{27BF}\uFE0F]/gu, "")
     .replace(/\s+/g, " ")
     .trim();
+}
+
+function fitStackLine(items: string[], maxChars: number): string {
+  const chosen: string[] = [];
+  for (const item of items) {
+    const candidate = chosen.length === 0 ? item : `${chosen.join(" · ")} · ${item}`;
+    if (candidate.length <= maxChars) {
+      chosen.push(item);
+    }
+  }
+  return chosen.length > 0 ? chosen.join(" · ") : truncate(items[0] || "Software Engineering", maxChars);
 }
 
 function getStatIcon(kind: "repos" | "stars" | "commits" | "forks", color: string): string {
@@ -54,7 +64,7 @@ export function generateSVG(
   const safeUsername = escapeXml(stats.username);
   const rawBio = stripEmoji(stats.bio);
   const bioText = escapeXml(
-    truncate(rawBio || "Building production software and intelligent systems.", 58)
+    truncate(rawBio || "Building production software and intelligent systems.", 54)
   );
   const roleLabel = escapeXml(truncate(stripEmoji(customRole || stats.inferredRole || "Software Engineer"), 26));
 
@@ -79,11 +89,13 @@ export function generateSVG(
   const rightX = pad + leftW + 42; // 508
   const rightW = W - rightX - pad; // 340
 
+  // IMPORTANT: Never animate `transform` on <g transform="translate(...)"> elements,
+  // because CSS `transform` overrides SVG `transform` attributes and resets them to (0,0).
   const getFadeAnim = (delayMs: number) =>
-    animate ? `animation: fadeSlideIn 0.45s cubic-bezier(0.16,1,0.3,1) ${delayMs}ms both;` : "";
+    animate ? `animation: fadeIn 0.4s ease-out ${delayMs}ms both;` : "";
 
   const getBarAnim = (delayMs: number) =>
-    animate ? `transform-origin: left center; animation: growBar 0.65s cubic-bezier(0.16,1,0.3,1) ${delayMs}ms both;` : "";
+    animate ? `transform-origin: left center; animation: growBar 0.6s cubic-bezier(0.16,1,0.3,1) ${delayMs}ms both;` : "";
 
   const cards: Array<{
     kind: "repos" | "stars" | "commits" | "forks";
@@ -107,24 +119,25 @@ export function generateSVG(
     .map((c, i) => {
       const x = pad + c.col * (cW + cGap);
       const y = bodyY + c.row * (cH + cGap);
-      const anim = getFadeAnim(80 + i * 55);
+      const anim = getFadeAnim(70 + i * 50);
       return `
-  <g transform="translate(${x},${y})" class="stat-card" style="${anim}">
-    <rect width="${cW}" height="${cH}" rx="12" fill="${cardBgFill}" stroke="${t.border}" stroke-width="${cardStrokeWidth}"/>
-    <g transform="translate(16, 17)">
-      ${getStatIcon(c.kind, c.color)}
-      <text x="20" y="11" font-family="${fontSans}" font-size="10.5" font-weight="700" fill="${t.textMuted}" letter-spacing="0.9">${c.label}</text>
+  <g transform="translate(${x},${y})">
+    <g class="stat-card" style="${anim}">
+      <rect class="card-bg" width="${cW}" height="${cH}" rx="12" fill="${cardBgFill}" stroke="${t.border}" stroke-width="${cardStrokeWidth}"/>
+      <g transform="translate(16, 17)">
+        ${getStatIcon(c.kind, c.color)}
+        <text x="20" y="11" font-family="${fontSans}" font-size="10.5" font-weight="700" fill="${t.textMuted}" letter-spacing="0.9">${c.label}</text>
+      </g>
+      <text x="16" y="69" font-family="${fontMono}" font-size="29" font-weight="700" fill="${t.text}" class="num">${formatNumber(c.value)}</text>
+      <text x="16" y="90" font-family="${fontSans}" font-size="11" fill="${t.textMuted}">${c.sub}</text>
+      <rect x="16" y="100" width="26" height="2.5" rx="1.25" fill="${c.color}" opacity="0.85"/>
     </g>
-    <text x="16" y="69" font-family="${fontMono}" font-size="29" font-weight="700" fill="${t.text}" class="num">${formatNumber(c.value)}</text>
-    <text x="16" y="90" font-family="${fontSans}" font-size="11" fill="${t.textMuted}">${c.sub}</text>
-    <rect x="16" y="100" width="26" height="2.5" rx="1.25" fill="${c.color}" opacity="0.85"/>
   </g>`;
     })
     .join("");
 
   const langs = stats.topLanguages.slice(0, 5);
 
-  // Stacked proportional language bar
   let accX = 0;
   const stackedSegments = langs
     .map((lang) => {
@@ -142,15 +155,17 @@ export function generateSVG(
           .map((lang, i) => {
             const color = langColors[lang.name] || t.accent;
             const barW = Math.max(4, (lang.percentage / 100) * rightW);
-            const rowY = i * 31;
-            const delay = 180 + i * 45;
+            const rowY = i * 29;
+            const delay = 160 + i * 45;
             return `
-    <g transform="translate(0,${rowY})" style="${getFadeAnim(delay)}">
-      <circle cx="5" cy="8" r="4.5" fill="${color}"/>
-      <text x="17" y="12" font-family="${fontSans}" font-size="12.5" font-weight="600" fill="${t.text}">${escapeXml(truncate(lang.name, 22))}</text>
-      <text x="${rightW}" y="12" font-family="${fontMono}" font-size="12" font-weight="600" fill="${t.textMuted}" text-anchor="end" class="num">${lang.percentage.toFixed(1)}%</text>
-      <rect x="0" y="20" width="${rightW}" height="4.5" rx="2.25" fill="${t.border}" opacity="0.45"/>
-      <rect x="0" y="20" width="${barW.toFixed(2)}" height="4.5" rx="2.25" fill="${color}" style="${getBarAnim(delay + 60)}"/>
+    <g transform="translate(0,${rowY})">
+      <g style="${getFadeAnim(delay)}">
+        <circle cx="5" cy="8" r="4.5" fill="${color}"/>
+        <text x="17" y="12" font-family="${fontSans}" font-size="12.5" font-weight="600" fill="${t.text}">${escapeXml(truncate(lang.name, 22))}</text>
+        <text x="${rightW}" y="12" font-family="${fontMono}" font-size="12" font-weight="600" fill="${t.textMuted}" text-anchor="end" class="num">${lang.percentage.toFixed(1)}%</text>
+        <rect x="0" y="19" width="${rightW}" height="4.5" rx="2.25" fill="${t.border}" opacity="0.45"/>
+        <rect x="0" y="19" width="${barW.toFixed(2)}" height="4.5" rx="2.25" fill="${color}" style="${getBarAnim(delay + 50)}"/>
+      </g>
     </g>`;
           })
           .join("")
@@ -161,7 +176,7 @@ export function generateSVG(
       ? stats.aiStack
       : langs.slice(0, 4).map((l) => l.name);
   const stackLine = escapeXml(
-    truncate(stackItems.length > 0 ? stackItems.join(" · ") : "Open Source Development", 46)
+    fitStackLine(stackItems.length > 0 ? stackItems : ["Open Source Development"], 44)
   );
 
   const updatedDate = new Date().toLocaleDateString("en-US", {
@@ -175,9 +190,9 @@ export function generateSVG(
   return `<svg width="${W}" height="${H}" viewBox="0 0 ${W} ${H}" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="GitHub Stats for ${safeUsername}">
   <defs>
     <style>
-      @keyframes fadeSlideIn {
-        from { opacity: 0; transform: translateY(4px); }
-        to { opacity: 1; transform: translateY(0); }
+      @keyframes fadeIn {
+        from { opacity: 0; }
+        to { opacity: 1; }
       }
       @keyframes growBar {
         from { transform: scaleX(0); }
@@ -186,12 +201,12 @@ export function generateSVG(
       .num { font-feature-settings: 'tnum'; font-variant-numeric: tabular-nums; }
       ${
         variant !== "minimal"
-          ? `.stat-card { transition: transform 0.18s ease, opacity 0.18s ease; }
-             .stat-card:hover { transform: translateY(-2px); }`
+          ? `.stat-card .card-bg { transition: stroke 0.18s ease; }
+             .stat-card:hover .card-bg { stroke: ${t.title}; }`
           : ""
       }
       @media (prefers-reduced-motion: reduce) {
-        * { animation: none !important; transition: none !important; opacity: 1 !important; transform: none !important; }
+        * { animation: none !important; transition: none !important; opacity: 1 !important; }
       }
     </style>
     <linearGradient id="accentGrad" x1="0%" y1="0%" x2="100%" y2="0%">
@@ -214,13 +229,13 @@ export function generateSVG(
       <rect x="1" y="1" width="${W - 2}" height="${H - 2}" rx="19"/>
     </clipPath>
     <clipPath id="headerTextClip">
-      <rect x="0" y="0" width="520" height="72"/>
+      <rect x="0" y="0" width="510" height="72"/>
     </clipPath>
     <clipPath id="distBarClip">
       <rect x="0" y="0" width="${rightW}" height="7" rx="3.5"/>
     </clipPath>
     <clipPath id="stackClip">
-      <rect x="0" y="0" width="${rightW}" height="40"/>
+      <rect x="0" y="0" width="${rightW}" height="42"/>
     </clipPath>
   </defs>
 
@@ -233,22 +248,24 @@ export function generateSVG(
   </g>
 
   <!-- Profile Header -->
-  <g transform="translate(${pad}, 26)" style="${getFadeAnim(0)}">
-    <rect x="0" y="0" width="54" height="54" rx="14" fill="${t.accent}" fill-opacity="0.12" stroke="${t.accent}" stroke-opacity="0.35" stroke-width="1"/>
-    <text x="27" y="35" font-family="${fontSans}" font-size="22" font-weight="700" fill="${t.title}" text-anchor="middle">${initial}</text>
+  <g transform="translate(${pad}, 26)">
+    <g style="${getFadeAnim(0)}">
+      <rect x="0" y="0" width="54" height="54" rx="14" fill="${t.accent}" fill-opacity="0.12" stroke="${t.accent}" stroke-opacity="0.35" stroke-width="1"/>
+      <text x="27" y="35" font-family="${fontSans}" font-size="22" font-weight="700" fill="${t.title}" text-anchor="middle">${initial}</text>
 
-    <g transform="translate(70, 0)" clip-path="url(#headerTextClip)">
-      <text x="0" y="19" font-family="${fontSans}" font-size="20" font-weight="700" fill="${t.text}" letter-spacing="-0.3">${displayName}</text>
-      <text x="0" y="39" font-family="${fontSans}" font-size="12.5" fill="${t.textMuted}">
-        <tspan fill="${t.title}" font-weight="600">@${safeUsername}</tspan>
-        <tspan> · ${bioText}</tspan>
-      </text>
-      <text x="0" y="57" font-family="${fontSans}" font-size="11.5" fill="${t.textMuted}">${subMetaText}</text>
-    </g>
+      <g transform="translate(70, 0)" clip-path="url(#headerTextClip)">
+        <text x="0" y="19" font-family="${fontSans}" font-size="20" font-weight="700" fill="${t.text}" letter-spacing="-0.3">${displayName}</text>
+        <text x="0" y="39" font-family="${fontSans}" font-size="12.5" fill="${t.textMuted}">
+          <tspan fill="${t.title}" font-weight="600">@${safeUsername}</tspan>
+          <tspan> · ${bioText}</tspan>
+        </text>
+        <text x="0" y="57" font-family="${fontSans}" font-size="11.5" fill="${t.textMuted}">${subMetaText}</text>
+      </g>
 
-    <g transform="translate(${W - pad * 2}, 0)">
-      <text x="0" y="19" font-family="${fontSans}" font-size="12.5" font-weight="700" fill="${t.title}" text-anchor="end">${roleLabel}</text>
-      <text x="0" y="39" font-family="${fontMono}" font-size="11" fill="${t.textMuted}" text-anchor="end" class="num">${formatNumber(stats.totalFollowers)} followers · ${formatNumber(stats.totalRepos)} repos</text>
+      <g transform="translate(${W - pad * 2}, 0)">
+        <text x="0" y="19" font-family="${fontSans}" font-size="12.5" font-weight="700" fill="${t.title}" text-anchor="end">${roleLabel}</text>
+        <text x="0" y="39" font-family="${fontMono}" font-size="11" fill="${t.textMuted}" text-anchor="end" class="num">${formatNumber(stats.totalFollowers)} followers · ${formatNumber(stats.totalRepos)} repos</text>
+      </g>
     </g>
   </g>
 
@@ -263,7 +280,7 @@ export function generateSVG(
 
   <!-- Right Column: Top Languages & Engineering Stack -->
   <g transform="translate(${rightX}, ${bodyY})">
-    <g style="${getFadeAnim(120)}">
+    <g style="${getFadeAnim(100)}">
       <g fill="none" stroke="${t.title}" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" transform="translate(0, 1)">
         <polyline points="4,3 1,6.5 4,10"/>
         <polyline points="10,3 13,6.5 10,10"/>
@@ -274,29 +291,35 @@ export function generateSVG(
     </g>
 
     <!-- Proportional Stacked Bar -->
-    <g transform="translate(0, 23)" clip-path="url(#distBarClip)" style="${getFadeAnim(150)}">
-      <rect x="0" y="0" width="${rightW}" height="7" fill="${t.border}" opacity="0.45"/>
-      ${stackedSegments}
+    <g transform="translate(0, 23)" clip-path="url(#distBarClip)">
+      <g style="${getFadeAnim(130)}">
+        <rect x="0" y="0" width="${rightW}" height="7" fill="${t.border}" opacity="0.45"/>
+        ${stackedSegments}
+      </g>
     </g>
 
     <!-- Language Breakdown Rows -->
-    <g transform="translate(0, 44)">
+    <g transform="translate(0, 42)">
       ${langsSVG}
     </g>
 
     <!-- AI / Engineering Stack Summary -->
-    <g transform="translate(0, 202)" clip-path="url(#stackClip)" style="${getFadeAnim(360)}">
-      <line x1="0" y1="0" x2="${rightW}" y2="0" stroke="${t.divider}" stroke-width="1"/>
-      <text x="0" y="16" font-family="${fontSans}" font-size="10" font-weight="700" fill="${t.textMuted}" letter-spacing="1">ENGINEERING STACK</text>
-      <text x="0" y="33" font-family="${fontMono}" font-size="11.5" font-weight="500" fill="${t.text}">${stackLine}</text>
+    <g transform="translate(0, 196)" clip-path="url(#stackClip)">
+      <g style="${getFadeAnim(320)}">
+        <line x1="0" y1="0" x2="${rightW}" y2="0" stroke="${t.divider}" stroke-width="1"/>
+        <text x="0" y="16" font-family="${fontSans}" font-size="10" font-weight="700" fill="${t.textMuted}" letter-spacing="1">ENGINEERING STACK</text>
+        <text x="0" y="34" font-family="${fontMono}" font-size="11.5" font-weight="500" fill="${t.text}">${stackLine}</text>
+      </g>
     </g>
   </g>
 
   <!-- Footer -->
   <line x1="${pad}" y1="364" x2="${W - pad}" y2="364" stroke="${t.divider}" stroke-width="1"/>
-  <g transform="translate(${pad}, 383)" style="${getFadeAnim(420)}">
-    <text x="0" y="0" font-family="${fontMono}" font-size="11" fill="${t.textMuted}" class="num">${formatNumber(stats.totalCommits)} commits · ${formatNumber(stats.totalStars)} stars · ${formatNumber(stats.totalForks)} forks</text>
-    <text x="${W - pad * 2}" y="0" font-family="${fontMono}" font-size="11" fill="${t.textMuted}" text-anchor="end">github-stats-api · ${escapeXml(updatedDate)}</text>
+  <g transform="translate(${pad}, 383)">
+    <g style="${getFadeAnim(360)}">
+      <text x="0" y="0" font-family="${fontMono}" font-size="11" fill="${t.textMuted}" class="num">${formatNumber(stats.totalCommits)} commits · ${formatNumber(stats.totalStars)} stars · ${formatNumber(stats.totalForks)} forks</text>
+      <text x="${W - pad * 2}" y="0" font-family="${fontMono}" font-size="11" fill="${t.textMuted}" text-anchor="end">github-stats-api · ${escapeXml(updatedDate)}</text>
+    </g>
   </g>
 </svg>`;
 }
